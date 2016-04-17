@@ -1,0 +1,123 @@
+---
+title: "Data Mining Homework 3"
+author: "Max Buckley 15203431"
+date: "17/04/2016"
+output: pdf_document
+---
+# Introduction
+The assignment is as follows:
+
+>You are provided with bicycle counter data as an Excel spreadsheet for D´un Laoghaire-Rathdown County Council in Dublin for the years 2012-2015. The file contains data relating to the location of and numbers of cyclists recorded at key locations within the D´un Laoghaire Rathdown area. Your task is to analyse the cycle counter data using either R or Enterprise Miner to address the following:
+
+>Calculate monthly summaries at each location for the years 2012, 2013 and 2014
+
+a) Describe the steps undertaken to achieve this task.
+
+b) Present the results in both tabular form and as histograms.
+
+c) Describe any trends observed in the monthly data.
+
+d) Attempt to explain any trends observed.
+
+# Tools
+For this assignment I will be using the statistical programming language [R]. I will be using the [ggplot2] plotting library and rendering the whole thing using [RStudio] and [RMarkdown].
+
+```{r results='hide', message=F, warning=F}
+# Dependancies.
+library("plyr")
+library('xlsx')
+library('zoo')
+library('reshape')
+library('reshape2')
+library('ggplot2')
+library('lubridate')
+
+# Clear R environment.
+rm(list=ls())
+setwd('~/UCD/DataMining/HW3/')
+
+excel_file <- 'cycle-counter-data-2012-to-2015-daily.xlsx'
+sheets <- getSheets(loadWorkbook(excel_file))
+target_sheet<-sheets[2:length(sheets)]
+# List to store all the data frames.
+df_list <- list()
+# First sheet is only metadata. 
+for(i in 2:length(sheets)){
+  df <- read.xlsx(excel_file, i)
+  df$Sheet <- sheets[[i]]$getSheetName()
+  df_list[[i]] <- df
+}
+
+# Combine all the data frames into one.
+data <- rbind.fill(df_list[1:i])
+```
+
+Now I have loaded all the data into one dataframe object. Now I must affregate it by month and location.
+
+```{r results='hide', message=F, warning=F}
+# This is the month field
+data$Month<-as.yearmon(data$Date, '%b %Y')
+
+melted_data <- melt(data, id=c('Date','Sheet','Month'))
+
+#Remove NA rows.
+melted_data <- melted_data[complete.cases(melted_data),]
+
+colnames(melted_data)[4]<-'Location'
+sum_data<-aggregate(melted_data$value, by=list(
+  melted_data$Month, melted_data$Location), FUN=sum, na.rm=TRUE)
+colnames(sum_data)<-c("Month", "Location", "Value")
+cast_data<- cast(sum_data,Month~Location)
+#Cleanup and shorten column names.
+colnames(cast_data)<-gsub('DataOnly\\.?','',gsub('(\\.+|_)','',colnames(cast_data)))
+
+# I will just show 4 histograms as an example.
+ggplot(cast_data, aes(RockRoadBusLaneBesidePark)) + geom_histogram()
+ggplot(cast_data, aes(N11Montrose)) + geom_histogram()
+ggplot(cast_data, aes(INTowardsCityCentre)) + geom_histogram()
+ggplot(cast_data, aes(OUTAwayFromCityCentre)) + geom_histogram()
+
+```
+
+Looking at all of the above histograms and some I did not include it becomes clear we have a lot of months with 0 observations along the left sides of these histograms. It is unlikely that 0 people passed the sensor on those months and it is more likely that the sensor was broken. Looking on one example we can clearly see what I mean
+
+```{r}
+cast_data[,c('RockRoadParkOUT')]
+cast_data$Month<-as.Date(cast_data$Month)
+ggplot(cast_data, aes(x=Month, y=RockRoadParkOUT)) + geom_line()
+```
+
+It appears at the end of 2014/ beginning of 2015 the sensor stopped working and the data is missing. In these circumstances interpolation would be good for filling the missing values.
+
+```{r}
+df<-data.frame(cbind(format(ISOdate(2004,1:12,1),"%B"),
+                     tapply(sum_data$Value, month(sum_data$Month), FUN=mean)))
+df$X2<-as.numeric(as.character(df$X2))
+df$X1<-factor(df$X1, levels=df$X1)
+ggplot(df, aes(x=X1, y=X2)) + geom_bar(
+  stat='identity')+theme(axis.text=element_text(size=6), axis.title=element_text(size=14)) + xlab("Month") + ylab("Average Cyclists")
+````
+
+We see the greatest number of cyclists in September and October and the lowest in December and January. This is probably weather related. With a bump in September from students going back to school.
+
+# Part 2 Prediction
+
+```{r}
+for(column in 2:length(cast_data)){
+  col<-colnames(cast_data)[column]
+  print(col)
+  train<-cast_data[cast_data$Month<"2015-01-01",col]
+  test<-cast_data[cast_data$Month>="2015-01-01",col]
+  train<-train[!is.na(train)]
+  print(length(train))
+  }
+
+ts_train<-ts(train, frequency=3)
+hw_model <-HoltWinters(ts_train)
+predictions <- c(train, predict(hw_model, n.ahead=100))[37:48]
+plot(test, predictions)
+mu<-mean(train, na.rm=TRUE)
+#Mean absolute error.
+mae<-mean(abs(test-mu))
+
+```
