@@ -7,7 +7,7 @@ output: pdf_document
 # Introduction
 The assignment is as follows:
 
->You are provided with bicycle counter data as an Excel spreadsheet for D´un Laoghaire-Rathdown County Council in Dublin for the years 2012-2015. The file contains data relating to the location of and numbers of cyclists recorded at key locations within the D´un Laoghaire Rathdown area. Your task is to analyse the cycle counter data using either R or Enterprise Miner to address the following:
+>You are provided with bicycle counter data as an Excel spreadsheet for Dun Laoghaire-Rathdown County Council in Dublin for the years 2012-2015. The file contains data relating to the location of and numbers of cyclists recorded at key locations within the Dun Laoghaire Rathdown area. Your task is to analyse the cycle counter data using either R or Enterprise Miner to address the following:
 
 1. Calculate monthly summaries at each location for the years 2012, 2013 and 2014
 
@@ -31,7 +31,7 @@ c) Would you use your best predictive model? Discuss your answer.
 For this assignment I will be using the statistical programming language [R]. I will be using the [ggplot2] plotting library and rendering the whole thing using [RStudio] and [RMarkdown].
 
 # Data preperation
-One of the early steps in any data mining process such as CRISP-DM is that  of data preperation. Once we have our business and data understanding we need to prepare our data for analysis and modelling.  Our input data needs to be read in, preprocessed and prepared for the subsequent stages to take place. In this case our input data is spread accross multiple sheets (One per year) of an excel spreadsheeet. So they all need to be read in and concatanated before we proceed. I save my preprocessed output so I only need to run the reading and converting from the base excel file once. Saving on unnecessary computation.
+One of the early steps in any data mining process such as [CRISP-DM] is that  of data preperation. Once we have our business and data understanding we need to prepare our data for analysis and modelling.  Our input data needs to be read in, preprocessed and prepared for the subsequent stages to take place. In this case our input data is spread accross multiple sheets (One per year) of an excel spreadsheeet. So they all need to be read in and concatanated before we proceed. I save my preprocessed output so I only need to run the reading and converting from the base excel file once. Saving on unnecessary computation.
 
 ```{r results='hide', message=F, warning=F}
 # Dependancies.
@@ -76,9 +76,22 @@ if(file.exists(rdata_file)){
 
 ```
 
-Now that I have loaded all the data into one R dataframe object, I must aggregate it by both month and location.
+Now that I have loaded all the data into one R dataframe object, I must aggregate it by both month and location. When aggregating the numeric data there is a question of how to best aggregate it. I saw three alternatives. 
+
+1) Sum: seemed like the obvious choice, however on second thought I realized some problems. If a sensor is only active for a few days in the month its sum total will be very low by comparison with fully active months.
+2) Mean: I also considered using the daily mean. This removes the above mentioned issue. Though would still be quite sensitive to outliers like days which are possibly incorrectly recorded as 0 or especially high days. 
+3) Median: The third option I considered and the one I opted for was to use the median daily traffic for each month. This has a nice insensitivity to outliers and is also insensitive to how many days the sensor was active.
+
 
 ```{r results='hide', message=F, warning=F}
+long_form_file_name <- 'long_form.Rda'
+wide_form_file_name <- 'wide_form.Rda'
+data_files <- c(wide_form_file_name, long_form_file_name)
+
+if(all(file.exists(data_files))){
+    load(long_form_file_name)
+    load(wide_form_file_name)
+}else{
 # This is the month field
 data$Month<-as.yearmon(data$Date, '%b %Y')
 
@@ -92,7 +105,7 @@ melted_data <- melted_data[complete.cases(melted_data),]
 colnames(melted_data)[4]<-'Location'
 #Aggregate by month.
 sum_data<-aggregate(melted_data$value, by=list(
-  melted_data$Month, melted_data$Location), FUN=sum, na.rm=TRUE)
+  melted_data$Month, melted_data$Location), FUN=median, na.rm=TRUE)
 
 # Rename columns
 colnames(sum_data)<-c("Month", "Location", "Value")
@@ -103,29 +116,33 @@ sum_data$Location <- gsub('DataOnly', '', sum_data$Location)
 
 #Convert long form data back to wide form. Now it has been aggregated and cleaned.
 cast_data<- cast(sum_data, Month~Location)
+
+save(sum_data, file=long_form_file_name)
+save(cast_data, file=wide_form_file_name)
+}
+
 ```
-# Data Visualization
+# Data Exploration
 At this point I have my preprocessed data available in both long form and wide form. I now want to plot it to explore it visually. First I will tabulate it in wide form and then explore it in histograms.
 
-```{r results='hide', message=F, warning=F}
+```{r message=F, warning=F}
+# Just want to use up to end of 2014 for question 1.
+# This overwrites my datasets but I can reload them from the .Rda files as required.
+sum_data <- sum_data[sum_data$Month < "2015-01",]
+cast_data<- data.frame(cast(sum_data, Month~Location))
+
+training_col_names <- colnames(cast_data)
+
 # Print the wide form dataset.
-print(head(cast_data))
+print(cast_data)
 
-# Plot 20 histograms together.
-p <- ggplot(sum_data, aes(Value)) + geom_histogram()
-p+ facet_wrap(~Location) + theme(strip.text.x = element_text(size=6),
-                                 axis.text.x = element_text(size=6, angle=45))
+# Print summary of the wide form data. Skip the month column.
+summary(cast_data[2:length(cast_data)])
 
-
-
-
-# I will just show 4 more detailed histograms as an example.
-ggplot(cast_data, aes(RockRoadBusLaneBesidePark)) + geom_histogram()
-ggplot(cast_data, aes(N11Montrose)) + geom_histogram()
 
 ```
 
-Looking at all of the above histograms it becomes clear we have a lot of months with 0 observations along the left sides of these histograms. It is unlikely that 0 people passed the sensor on those months and it is more likely that the sensor was broken. Looking on one example we can clearly see what I mean
+Looking at the tabular data we see a lot of NA rows which means missing data, but we also see some 0 rows. It is unlikely that 0 people passed the sensor on those months unless there is some explanation like the road is closed for road works, it is more likely that the sensor was broken. Looking on one example we can clearly see what I mean
 
 ```{r}
 cast_data[,c('RockRoadParkOUT')]
@@ -133,45 +150,176 @@ cast_data$Month<-as.Date(cast_data$Month)
 ggplot(cast_data, aes(x=Month, y=RockRoadParkOUT)) + geom_line()
 ```
 
-It appears at the end of 2014/ beginning of 2015 the sensor stopped working and the data is missing. In these circumstances interpolation would be good for filling the missing values.
+It appears at the end of 2014/beginning of 2015 the sensor started recording 0 observations. In these circumstances interpolation may be a good for filling the missing values.
 
+# Data Visualization
+```{r message=F, warning=F}
+# Plot all the histograms together.
+p <- ggplot(sum_data, aes(Value)) + geom_histogram()
+p+ facet_wrap(~Location) + theme(strip.text.x = element_text(size=7),
+                                 axis.text.x = element_text(size=7, angle=30))
+
+```
+
+Looking at the above histograms it becomes clear we have a different distribution for each of the locations. Though we see fairly similar distributions for the matched location pairs. For example in Glenageary 'BicycleIn' and 'BicycleOut' match pretty closely. Same for 'WalkingIn' and 'WalkingOut'. 
+
+The same is true in Totem Clonskeagh Road. We see a very strong correlation between the 'TotemIn' and 'TotemOut' traffic
+
+```{r message=F, warning=F}
+ggplot(cast_data, aes(x=BicycleIN, y=BicycleOUT)) + geom_point() +
+  geom_smooth(method="lm", se=FALSE) + ggtitle("Glenageary Bicyle Traffic")
+ggplot(cast_data, aes(x=WalkingIN, y=WalkingOUT)) + geom_point() +
+  geom_smooth(method="lm", se=FALSE) + ggtitle("Glenageary Pedestrian Traffic")
+ggplot(cast_data, aes(x=TotemIN, y=TotemOUT)) + geom_point() +
+  geom_smooth(method="lm", se=FALSE) + ggtitle("Totem Clonskeagh Road Cycle Traffic")
+```
+
+The similarity makes sense. Typically if someone walks somewhere they have to walk back or if they cycle somewhere they have to cycle back.
+
+Interestingly the walking traffic line is a poorer fit than the cycling line. Probably due to the flexibilty of not having a bike. If it rains and you walked in you can get the bus or a taxi home.
+
+## Interesting Behavior
+The most different pair we see is that of the N11 Montrose
+city center road. The difference being in the magnitude. Note the y axis values are approx 5x what the c axis values are. This can easily be seen in a linear model output.
+
+```{r}
+ggplot(cast_data, aes(x=INTowardsCityCentre, y=OUTAwayFromCityCentre)) +
+  geom_point() +geom_smooth(method="lm", se=FALSE)
+
+lm(OUTAwayFromCityCentre~INTowardsCityCentre, data=cast_data)
+```
+
+It is difficult to figure out how  5 times as many people cycle out of the city center every day as cycle in. If this were to happen for a long period there would be no bicycles left in the city. From my speculation possible reasons for this include but are not limited to:
+
+1) People cycle out on this road but cycle in on other(Safer?) roads. Why they do this I do not know. Maybe there is only a cycle lane on one side or there is a wide pavement on one side. So people don't go past the sensor as they are on the pavement
+2) Perhaps there is a steep incline and so people enjoy cycling in but avoid cycling out. Perhaps using something like Dublin bikes.
+
+# Seasonal Trends
 ```{r}
 df<-data.frame(cbind(format(ISOdate(2004,1:12,1),"%B"),
                      tapply(sum_data$Value, month(sum_data$Month), FUN=mean)))
 df$X2<-as.numeric(as.character(df$X2))
 df$X1<-factor(df$X1, levels=df$X1)
-ggplot(df, aes(x=X1, y=X2)) + geom_bar(
-  stat='identity')+theme(axis.text=element_text(size=6), axis.title=element_text(size=14)) + xlab("Month") + ylab("Average Cyclists")
+ggplot(df, aes(x=X1, y=X2)) +
+  geom_bar(stat='identity') +
+  theme(axis.text=element_text(size=6), axis.title=element_text(size=12)) +
+  xlab("Month") + ylab("Average Cyclists")
+
+# May use this later
+month_scales<-df$X2/min(df$X2)
 ````
 
-We see the greatest number of cyclists in September and October and the lowest in December and January. This is probably weather related. With a bump in September from students going back to school.
+We see the greatest number of cyclists in September and October and the lowest numbers seen in December and January. This is probably weather related. With a particular bump in September from students going back to school.
 
 # Part 2 Prediction
+For predicting the number of cyclists at each site I will try two models. A naive predict the average model and a [Holt-Winters] exponential smoothing time series model.
+
+There are some limitations with the Holt-Winters model that mean I cannot always fit them without adjustment.
+
+1) I need at least two years, 24 months of data.
+
+2) I can't have 0 values in those 2 years.
+
+Similarly when comparing my prediction results to the 'truth' I have to be careful in the case that the truth for 2015 has no missing values or 0s as they can inflate the prediction error of my model which may not be correct.
 
 ```{r}
-for(column in 2:length(cast_data)){
-  col<-colnames(cast_data)[column]
-  print(col)
-  train<-cast_data[cast_data$Month<"2015-01-01",col]
-  test<-cast_data[cast_data$Month>="2015-01-01",col]
-  train<-train[!is.na(train)]
-  print(length(train))
+#Reload all the data. Including 2015
+for(file in data_files){
+  load(file)
   }
 
-ts_train<-ts(train, frequency=3)
-hw_model <-HoltWinters(ts_train)
-predictions <- c(train, predict(hw_model, n.ahead=100))[37:48]
-#plot(test, predictions)
-mu<-mean(train, na.rm=TRUE)
-#Mean absolute error.
-mae<-mean(abs(test-mu))
+# My cost function to see how good my predictions are.
+mean_absolute_error <- function(ground_truth, predictions){
+  return(mean(abs(predictions - ground_truth)))
+  }
+
+# Can only predict on the 17 columns we had in the training set.
+for(column in training_col_names[-c(1,4)]){
+  train <- cast_data[cast_data$Month < "2015-01-01", column]
+  test <- cast_data[cast_data$Month >= "2015-01-01", column]
+  
+  mu <- mean(train, na.rm=TRUE)
+  
+  # Baseline naive guess the average model.
+  mu_vec <- rep(mu, 12)
+  
+  mae_mu <- mean_absolute_error(test, mu_vec)
+
+  print(paste0(column, " MAE mean model: ", mae_mu))
+  
+  # Make NA values into 0 
+  train[is.na(train)] <- 0
+
+  # We need at least two full years to fit a Holt-Winters model. 
+  if(length(train[train>0]) >= 24){
+    # Holt-Winters will fail if there are zeroes present.
+    train[train==0] <- round(mu)
+    
+    # Convert to an R time series object.
+    ts_train<-ts(train, frequency=12)
+    
+    # Fit a Holt-Winters exponential smoothing model.
+    hw_model <-suppressWarnings(HoltWinters(ts_train))
+    
+    # Predict using Holt-Winters model
+    predictions <- predict(hw_model, n.ahead=12)
+
+    # Mean absolute error.
+    mae_hw <- mean_absolute_error(test, predictions)
+    
+    # Check sum before and after filling 0s
+    old_sum <- sum(test, na.rm=TRUE)
+    
+    # Fill 0s
+    test[test==0] <- round(mu)
+
+    mae_hw_filled <- mean_absolute_error(test, predictions)
+
+    print(paste0(column, " MAE Holt-Winters model: ", mae_hw))
+    
+    if(sum(test, na.rm=TRUE)>old_sum){
+      print(paste0(column, " MAE Holt-Winters model 0 filled: ", mae_hw_filled))
+    }
+
+    print(paste0(column, " Holt-Winters to Mean ratio: ", mae_hw/mae_mu))
+  }
+}
+```
+
+You can see in the print outs above how my models did against the withheld training set. The mean absolute error for the Holt-Winters model was superior then the baseline average model in most instances.
+
+In the instances in which Holt-Winters was outperformed by the mean model there was usually a root cause. Taking for example the case of the "INTowardsCityCentre" column
+```{r}
+column <-"INTowardsCityCentre"
+train <- cast_data[cast_data$Month < "2015-01-01", column]
+test <- cast_data[cast_data$Month >= "2015-01-01", column]
+  
+mu <- mean(train, na.rm=TRUE)
+
+# The two low final values give the time series model the impression
+# the data is turning down. When it may be a recording anomaly.
+train[35:36] <- mu
+
+# Similarly we see 3 anomalous values in the testing set
+test
+
+ts_train<-ts(train, frequency=12)
+    
+# Fit a Holt-Winters exponential smoothing model.
+hw_model <-suppressWarnings(HoltWinters(ts_train))
+    
+# Predict using Holt-Winters model
+predictions <- predict(hw_model, n.ahead=12)
+
 
 ```
 
+TBC tomorrow
 
-
+[CRISP-DM]:https://en.wikipedia.org/wiki/Cross_Industry_Standard_Process_for_Data_Mining
 [Github]:https://github.com/maxwbuckley/DataMiningHW2
 [ggplot2]:http://ggplot2.org/
+[Holt-Winters]:https://en.wikipedia.org/wiki/Exponential_smoothing
 [R]:http://www.r-project.org/
 [RStudio]:http://www.rstudio.com/
 [RMarkdown]:http://rmarkdown.rstudio.com/
