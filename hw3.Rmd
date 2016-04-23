@@ -9,7 +9,7 @@ The assignment is as follows:
 
 >You are provided with bicycle counter data as an Excel spreadsheet for D´un Laoghaire-Rathdown County Council in Dublin for the years 2012-2015. The file contains data relating to the location of and numbers of cyclists recorded at key locations within the D´un Laoghaire Rathdown area. Your task is to analyse the cycle counter data using either R or Enterprise Miner to address the following:
 
->Calculate monthly summaries at each location for the years 2012, 2013 and 2014
+1. Calculate monthly summaries at each location for the years 2012, 2013 and 2014
 
 a) Describe the steps undertaken to achieve this task.
 
@@ -19,16 +19,23 @@ c) Describe any trends observed in the monthly data.
 
 d) Attempt to explain any trends observed.
 
+2. Predict the number of cyclists each month at each counter site using the data from 2012, 2013 and 2014 as training data, and 2015 as a test set.
+
+a) Describe the steps undertaken to achieve this task.
+
+b) Present an analysis of the results highlighting any limitations or weaknesses.
+
+c) Would you use your best predictive model? Discuss your answer.
+
 # Tools
 For this assignment I will be using the statistical programming language [R]. I will be using the [ggplot2] plotting library and rendering the whole thing using [RStudio] and [RMarkdown].
 
 # Data preperation
-One of the early steps in any data mining process such as CRISP-DM is that  of data preperation. Once we have our business and data understanding we need to prepare our data for analysis and modelling.  Our input data needs to be read in, preprocessed and prepared for the subsequent stages. In this case I save my preprocessed output so I only need to run the reading and converting from the base excel file once. Saving on unnecessary computation.
+One of the early steps in any data mining process such as CRISP-DM is that  of data preperation. Once we have our business and data understanding we need to prepare our data for analysis and modelling.  Our input data needs to be read in, preprocessed and prepared for the subsequent stages to take place. In this case our input data is spread accross multiple sheets (One per year) of an excel spreadsheeet. So they all need to be read in and concatanated before we proceed. I save my preprocessed output so I only need to run the reading and converting from the base excel file once. Saving on unnecessary computation.
 
 ```{r results='hide', message=F, warning=F}
 # Dependancies.
 library("plyr")
-library('xlsx')
 library('zoo')
 library('reshape')
 library('reshape2')
@@ -47,7 +54,9 @@ if(file.exists(rdata_file)){
   # File already exists don't need to recreate.
   load(rdata_file)
 }else{
-  # Need to generate Rda data file from excel input.
+  # Need to generate Rda data file.
+  # We will need to read the excel file. Need the xlsx package.  
+  library('xlsx')
   excel_file <- 'cycle-counter-data-2012-to-2015-daily.xlsx'
   sheets <- getSheets(loadWorkbook(excel_file))
   target_sheet<-sheets[2:length(sheets)]
@@ -85,26 +94,38 @@ colnames(melted_data)[4]<-'Location'
 sum_data<-aggregate(melted_data$value, by=list(
   melted_data$Month, melted_data$Location), FUN=sum, na.rm=TRUE)
 
-p <- ggplot(sum_data, aes(Value)) + geom_histogram()
-p + facet_wrap(~Location)
-
-
-
 # Rename columns
 colnames(sum_data)<-c("Month", "Location", "Value")
-cast_data<- cast(sum_data, Month~Location)
-#Cleanup and shorten column names.
-colnames(cast_data)<-gsub('DataOnly\\.?','',gsub('(\\.+|_)','', colnames(cast_data)))
+# Replace . and _ in Locations.
+sum_data$Location <- gsub('(\\.+|_)','', sum_data$Location)
+# Remove 'DataOnly' from the names of some locations. Makes it clearer in plots.
+sum_data$Location <- gsub('DataOnly', '', sum_data$Location)
 
-# I will just show 4 histograms as an example.
+#Convert long form data back to wide form. Now it has been aggregated and cleaned.
+cast_data<- cast(sum_data, Month~Location)
+```
+# Data Visualization
+At this point I have my preprocessed data available in both long form and wide form. I now want to plot it to explore it visually. First I will tabulate it in wide form and then explore it in histograms.
+
+```{r results='hide', message=F, warning=F}
+# Print the wide form dataset.
+print(head(cast_data))
+
+# Plot 20 histograms together.
+p <- ggplot(sum_data, aes(Value)) + geom_histogram()
+p+ facet_wrap(~Location) + theme(strip.text.x = element_text(size=6),
+                                 axis.text.x = element_text(size=6, angle=45))
+
+
+
+
+# I will just show 4 more detailed histograms as an example.
 ggplot(cast_data, aes(RockRoadBusLaneBesidePark)) + geom_histogram()
 ggplot(cast_data, aes(N11Montrose)) + geom_histogram()
-ggplot(cast_data, aes(INTowardsCityCentre)) + geom_histogram()
-ggplot(cast_data, aes(OUTAwayFromCityCentre)) + geom_histogram()
 
 ```
 
-Looking at all of the above histograms and some I did not include it becomes clear we have a lot of months with 0 observations along the left sides of these histograms. It is unlikely that 0 people passed the sensor on those months and it is more likely that the sensor was broken. Looking on one example we can clearly see what I mean
+Looking at all of the above histograms it becomes clear we have a lot of months with 0 observations along the left sides of these histograms. It is unlikely that 0 people passed the sensor on those months and it is more likely that the sensor was broken. Looking on one example we can clearly see what I mean
 
 ```{r}
 cast_data[,c('RockRoadParkOUT')]
