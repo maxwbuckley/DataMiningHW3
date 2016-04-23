@@ -22,6 +22,9 @@ d) Attempt to explain any trends observed.
 # Tools
 For this assignment I will be using the statistical programming language [R]. I will be using the [ggplot2] plotting library and rendering the whole thing using [RStudio] and [RMarkdown].
 
+# Data preperation
+One of the early steps in any data mining process such as CRISP-DM is that  of data preperation. Once we have our business and data understanding we need to prepare our data for analysis and modelling.  Our input data needs to be read in, preprocessed and prepared for the subsequent stages. In this case I save my preprocessed output so I only need to run the reading and converting from the base excel file once. Saving on unnecessary computation.
+
 ```{r results='hide', message=F, warning=F}
 # Dependancies.
 library("plyr")
@@ -34,42 +37,64 @@ library('lubridate')
 
 # Clear R environment.
 rm(list=ls())
+# Set working directory.
 setwd('~/UCD/DataMining/HW3/')
 
-excel_file <- 'cycle-counter-data-2012-to-2015-daily.xlsx'
-sheets <- getSheets(loadWorkbook(excel_file))
-target_sheet<-sheets[2:length(sheets)]
-# List to store all the data frames.
-df_list <- list()
-# First sheet is only metadata. 
-for(i in 2:length(sheets)){
-  df <- read.xlsx(excel_file, i)
-  df$Sheet <- sheets[[i]]$getSheetName()
-  df_list[[i]] <- df
+# R data preprocessed file. Does not need to exist.
+rdata_file <- 'cycle_counter_data.Rda'
+
+if(file.exists(rdata_file)){
+  # File already exists don't need to recreate.
+  load(rdata_file)
+}else{
+  # Need to generate Rda data file from excel input.
+  excel_file <- 'cycle-counter-data-2012-to-2015-daily.xlsx'
+  sheets <- getSheets(loadWorkbook(excel_file))
+  target_sheet<-sheets[2:length(sheets)]
+  # List to store all the data frames.
+  df_list <- list()
+  # First sheet is only metadata. Skip it.
+  for(i in 2:length(sheets)){
+    df <- read.xlsx(excel_file, i)
+    df$Sheet <- sheets[[i]]$getSheetName()
+    df_list[[i]] <- df
+  }
+  # Combine all the data frames into one.
+  data <- rbind.fill(df_list[1:i])
+  # Write out as .Rda file for future use.
+  save(data, file=rdata_file)
 }
 
-# Combine all the data frames into one.
-data <- rbind.fill(df_list[1:i])
 ```
 
-Now I have loaded all the data into one dataframe object. Now I must affregate it by month and location.
+Now that I have loaded all the data into one R dataframe object, I must aggregate it by both month and location.
 
 ```{r results='hide', message=F, warning=F}
 # This is the month field
 data$Month<-as.yearmon(data$Date, '%b %Y')
 
+#Convert data to long form.
 melted_data <- melt(data, id=c('Date','Sheet','Month'))
 
-#Remove NA rows.
+# Remove NA rows.
 melted_data <- melted_data[complete.cases(melted_data),]
 
+# Rename column.
 colnames(melted_data)[4]<-'Location'
+#Aggregate by month.
 sum_data<-aggregate(melted_data$value, by=list(
   melted_data$Month, melted_data$Location), FUN=sum, na.rm=TRUE)
+
+p <- ggplot(sum_data, aes(Value)) + geom_histogram()
+p + facet_wrap(~Location)
+
+
+
+# Rename columns
 colnames(sum_data)<-c("Month", "Location", "Value")
-cast_data<- cast(sum_data,Month~Location)
+cast_data<- cast(sum_data, Month~Location)
 #Cleanup and shorten column names.
-colnames(cast_data)<-gsub('DataOnly\\.?','',gsub('(\\.+|_)','',colnames(cast_data)))
+colnames(cast_data)<-gsub('DataOnly\\.?','',gsub('(\\.+|_)','', colnames(cast_data)))
 
 # I will just show 4 histograms as an example.
 ggplot(cast_data, aes(RockRoadBusLaneBesidePark)) + geom_histogram()
@@ -115,9 +140,17 @@ for(column in 2:length(cast_data)){
 ts_train<-ts(train, frequency=3)
 hw_model <-HoltWinters(ts_train)
 predictions <- c(train, predict(hw_model, n.ahead=100))[37:48]
-plot(test, predictions)
+#plot(test, predictions)
 mu<-mean(train, na.rm=TRUE)
 #Mean absolute error.
 mae<-mean(abs(test-mu))
 
 ```
+
+
+
+[Github]:https://github.com/maxwbuckley/DataMiningHW2
+[ggplot2]:http://ggplot2.org/
+[R]:http://www.r-project.org/
+[RStudio]:http://www.rstudio.com/
+[RMarkdown]:http://rmarkdown.rstudio.com/

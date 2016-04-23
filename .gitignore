@@ -2,4 +2,6 @@
 *~
 *.Rdata
 *.pdf
+*.Rda
 *.xlsx*
+*.Rhistory
