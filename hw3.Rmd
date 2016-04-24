@@ -152,6 +152,9 @@ ggplot(cast_data, aes(x=Month, y=RockRoadParkOUT)) + geom_line()
 
 It appears at the end of 2014/beginning of 2015 the sensor started recording 0 observations. In these circumstances interpolation may be a good for filling the missing values.
 
+On further exploration of the data I noted that beginning at approximatly the start November 2014 several sensors daily recording values fell to 0s. The columns for "N11Montrose", "OUTAwayFromCityCentre",  
+"INTowardsCityCentre", "RockRoadPark", "RockRoadParkIN", "RockRoadParkOUT" all show this same behaviour. This is a serious data quality issue and will effect any forecasting or aggregation done on this data. 
+
 # Data Visualization
 ```{r message=F, warning=F}
 # Plot all the histograms together.
@@ -214,13 +217,13 @@ We see the greatest number of cyclists in September and October and the lowest n
 # Part 2 Prediction
 For predicting the number of cyclists at each site I will try two models. A naive predict the average model and a [Holt-Winters] exponential smoothing time series model.
 
-There are some limitations with the Holt-Winters model that mean I cannot always fit them without adjustment.
+There are some limitations with the Holt-Winters model that mean I cannot always fit them without some adjustment.
 
 1) I need at least two years, 24 months of data.
 
-2) I can't have 0 values in those 2 years.
+2) I can't have 0 values within those 2 years. This is a particular issue given the data quality issues mentioned above in some sites.
 
-Similarly when comparing my prediction results to the 'truth' I have to be careful in the case that the truth for 2015 has no missing values or 0s as they can inflate the prediction error of my model which may not be correct.
+Similarly when comparing my prediction results to the 'truth' I have to be careful in the case that the truth for 2015 has no missing values or 0s as they can inflate the prediction error of my model which may not be accurate.
 
 ```{r}
 #Reload all the data. Including 2015
@@ -267,28 +270,18 @@ for(column in training_col_names[-c(1,4)]){
     # Mean absolute error.
     mae_hw <- mean_absolute_error(test, predictions)
     
-    # Check sum before and after filling 0s
-    old_sum <- sum(test, na.rm=TRUE)
-    
-    # Fill 0s
-    test[test==0] <- round(mu)
-
-    mae_hw_filled <- mean_absolute_error(test, predictions)
-
     print(paste0(column, " MAE Holt-Winters model: ", mae_hw))
-    
-    if(sum(test, na.rm=TRUE)>old_sum){
-      print(paste0(column, " MAE Holt-Winters model 0 filled: ", mae_hw_filled))
-    }
 
     print(paste0(column, " Holt-Winters to Mean ratio: ", mae_hw/mae_mu))
   }
 }
 ```
 
-You can see in the print outs above how my models did against the withheld training set. The mean absolute error for the Holt-Winters model was superior then the baseline average model in most instances.
+You can see in the print outs above how my models did against the withheld training set. The mean absolute error for the Holt-Winters model was superior then the baseline average model in most instances. In the instances in which Holt-Winters was outperformed by the mean model there was usually a root cause. Almost all those sites with the data issues I mentioned above ("N11Montrose", "OUTAwayFromCityCentre",  
+"INTowardsCityCentre", "RockRoadParkIN") are those in which the mean model outperformed the Holt-Winters model. This is unsurprising.
 
-In the instances in which Holt-Winters was outperformed by the mean model there was usually a root cause. Taking for example the case of the "INTowardsCityCentre" column
+Taking for example the case of the "INTowardsCityCentre" column which I mentioned above has a problem with a string of 0 values in the end of 2014/ start of 2015
+
 ```{r}
 column <-"INTowardsCityCentre"
 train <- cast_data[cast_data$Month < "2015-01-01", column]
@@ -297,12 +290,23 @@ test <- cast_data[cast_data$Month >= "2015-01-01", column]
 mu <- mean(train, na.rm=TRUE)
 
 # The two low final values give the time series model the impression
-# the data is turning down. When it may be a recording anomaly.
-train[35:36] <- mu
+# the data is turning down. When it is in fact likely to be a recording anomaly.
+train
 
-# Similarly we see 3 anomalous values in the testing set
+# Similarly we see 3 anomalous values in the testing set which again
+# may inflate our error metric.
 test
 
+```
+
+The ability to forecast is always determined by the quality and quantity of your input data. Garbage in leads to garbage out. So in cases when we have ample consistent data our forecasts look very credible and I would be comfortable using them. For example looking at one of them where the Holt-Winters model did quite well was "BicycleIn".
+
+```{r}
+column <- "BicycleIN"
+train <- cast_data[cast_data$Month < "2015-01-01", column]
+test <- cast_data[cast_data$Month >= "2015-01-01", column]
+ 
+# Convert to an R time series object.
 ts_train<-ts(train, frequency=12)
     
 # Fit a Holt-Winters exponential smoothing model.
@@ -311,10 +315,33 @@ hw_model <-suppressWarnings(HoltWinters(ts_train))
 # Predict using Holt-Winters model
 predictions <- predict(hw_model, n.ahead=12)
 
+df<- data.frame(cbind(test, predictions))
+
+# Look at forecasted values versus actuals we see the strong correlation
+p <- ggplot(df, aes(x=test, y=predictions)) + geom_point() +
+  geom_smooth(method="lm", se=FALSE)
+p + labs(title = paste0("Forecasted versus Actuals for ", column),
+         x="Observed values", y="Forecasted values")
+
+df <- data.frame(cbind(as.Date(cast_data$Month), c(train, predictions)))
+df$X1 <- as.Date(df$X1)
+df$type <- factor(c(rep(1, 36), rep(2, 12)), labels=c("Actuals", "Forecasted"))
+
+# Forecast looks visually credible. Captures trend and seasonality
+# of the time series effectively.
+p <- ggplot(df, aes(x=X1, y=X2, color=type)) + geom_line()
+p + labs(title = paste0("Forecast appended to Actuals for ", column),
+         x="Year", y="Value")
 
 ```
 
-TBC tomorrow
+In cases like BicycleIn where the forecast is pretty accurate and visually captures both the trend and seasonality I would be quite happy using it. No manager would have a concern about the turquoise forecast at the end of that orange time series.
+
+However when the data is spotty, has 0 values and or is very volatile I would have more concerns about using a model such as this. For these reasons forecasting tends to work better on an aggregated level rather than a lower, more granular level.
+
+So to answer the question of would I use my forecasts here. The answer is yes for most of them. For the ones I have concerns with, the ones with the data quality issues I would investigate further. Perhaps removing the offending final 2 months of questionable data and instead forecasting from a little earlier which is almost certainly more accurate than two months of 0 values. 
+
+If I were to continue working on this in a professional setting I would also attempt to fit some more complex time series models to see how they perform. Perhaps a bayesian time series model.
 
 [CRISP-DM]:https://en.wikipedia.org/wiki/Cross_Industry_Standard_Process_for_Data_Mining
 [Github]:https://github.com/maxwbuckley/DataMiningHW2
